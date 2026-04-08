@@ -44,15 +44,10 @@ const Index = () => (
           <p className="text-lg md:text-xl text-muted-foreground mb-8 max-w-2xl mx-auto animate-fade-in-delay-2">
             CryptoMix breaks the on-chain link between your transactions using advanced mixing pools, time delays, and multi-address distribution.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center animate-fade-in-delay-3">
+          <div className="flex justify-center animate-fade-in-delay-3">
             <Link to="/mixing">
-              <Button variant="hero" size="lg" className="gap-2">
-                Start Mixing <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link to="/how-it-works">
-              <Button variant="hero-outline" size="lg">
-                How It Works
+              <Button variant="hero" size="lg" className="gap-2 px-12 py-4 text-base h-14">
+                Iniciar Mixing <ArrowRight className="h-5 w-5" />
               </Button>
             </Link>
           </div>
