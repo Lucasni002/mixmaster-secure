@@ -24,12 +24,26 @@ const TIERS: Record<string, { min: number; max: number; rate: number; minFee: nu
     { min: 100, max: 1000, rate: 0.02, minFee: 2 },
     { min: 1000, max: 10000, rate: 0.015, minFee: 15 },
   ],
+  USDT: [
+    { min: 10, max: 1000, rate: 0.03, minFee: 0.3 },
+    { min: 1000, max: 10000, rate: 0.025, minFee: 25 },
+    { min: 10000, max: 100000, rate: 0.02, minFee: 200 },
+    { min: 100000, max: 1000000, rate: 0.015, minFee: 1500 },
+  ],
+  USDC: [
+    { min: 10, max: 1000, rate: 0.03, minFee: 0.3 },
+    { min: 1000, max: 10000, rate: 0.025, minFee: 25 },
+    { min: 10000, max: 100000, rate: 0.02, minFee: 200 },
+    { min: 100000, max: 1000000, rate: 0.015, minFee: 1500 },
+  ],
 };
 
 const RANGES: Record<string, { min: number; max: number; step: number }> = {
   BTC: { min: 0.001, max: 50, step: 0.001 },
   ETH: { min: 0.01, max: 500, step: 0.01 },
   LTC: { min: 0.1, max: 5000, step: 0.1 },
+  USDT: { min: 10, max: 500000, step: 1 },
+  USDC: { min: 10, max: 500000, step: 1 },
 };
 
 const FeeCalculator = () => {
