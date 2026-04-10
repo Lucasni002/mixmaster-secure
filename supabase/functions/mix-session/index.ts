@@ -1,5 +1,10 @@
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' }
+import { corsHeaders } from '@supabase/supabase-js/cors'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+interface OutputEntry {
+  address: string;
+  percentage: number;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -14,11 +19,17 @@ Deno.serve(async (req) => {
 
     if (req.method === 'POST') {
       const body = await req.json()
-      const { currency, amount, output_address, delay_hours } = body
+      const { currency, amount, outputs, delay_hours } = body as {
+        currency: string;
+        amount: number;
+        outputs: OutputEntry[];
+        delay_hours?: number;
+      }
 
-      if (!currency || !amount || !output_address) {
+      // Validate required fields
+      if (!currency || !amount || !outputs || !Array.isArray(outputs) || outputs.length === 0) {
         return new Response(
-          JSON.stringify({ error: 'Missing required fields: currency, amount, output_address' }),
+          JSON.stringify({ error: 'Missing required fields: currency, amount, outputs[]' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
         )
       }
@@ -30,18 +41,61 @@ Deno.serve(async (req) => {
         )
       }
 
-      if (!['BTC', 'ETH', 'LTC', 'USDT', 'USDC'].includes(currency)) {
+      const validCurrencies = ['BTC', 'ETH', 'LTC', 'USDT', 'USDC']
+      if (!validCurrencies.includes(currency)) {
         return new Response(
           JSON.stringify({ error: 'Unsupported currency' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
         )
       }
 
-      const fee_rate = 0.025 // SIMULATED: flat 2.5%
-      const fee_amount = amount * fee_rate
-      const net_amount = amount - fee_amount
-      const session_code = `MIX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      // Validate outputs
+      const totalPct = outputs.reduce((s, o) => s + (o.percentage || 0), 0)
+      if (Math.abs(totalPct - 100) > 0.01) {
+        return new Response(
+          JSON.stringify({ error: `Output percentages must total 100% (got ${totalPct}%)` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
+      }
 
+      for (const o of outputs) {
+        if (!o.address || o.address.trim().length < 10) {
+          return new Response(
+            JSON.stringify({ error: 'Each output address must be at least 10 characters' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          )
+        }
+      }
+
+      const delayH = delay_hours && delay_hours >= 1 && delay_hours <= 72 ? delay_hours : 6
+
+      // Fetch pricing from DB
+      const { data: rules } = await supabase
+        .from('pricing_rules')
+        .select('fee_rate, min_fee, min_amount, max_amount')
+        .eq('currency', currency)
+        .eq('is_active', true)
+        .order('min_amount')
+
+      let fee_rate = 0.025 // fallback
+      let min_fee = 0
+
+      if (rules && rules.length > 0) {
+        const tier = rules.find((r: any) =>
+          amount >= r.min_amount && (r.max_amount === null || amount < r.max_amount)
+        ) ?? rules[rules.length - 1]
+        fee_rate = tier.fee_rate
+        min_fee = tier.min_fee
+      }
+
+      const calculated_fee = amount * fee_rate
+      const fee_amount = Math.max(calculated_fee, min_fee)
+      const net_amount = Math.max(amount - fee_amount, 0)
+
+      const session_code = `MIX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      const primary_address = outputs[0].address
+
+      // Insert session
       const { data, error } = await supabase.from('mix_sessions').insert({
         session_code,
         currency,
@@ -49,8 +103,8 @@ Deno.serve(async (req) => {
         fee_rate,
         fee_amount,
         net_amount,
-        output_address,
-        delay_hours: delay_hours || 6,
+        output_address: primary_address,
+        delay_hours: delayH,
         status: 'pending',
       }).select().single()
 
@@ -61,16 +115,30 @@ Deno.serve(async (req) => {
         )
       }
 
-      // Log the action
+      // Insert outputs
+      const outputRows = outputs.map((o) => ({
+        session_id: data.id,
+        address: o.address.trim(),
+        percentage: o.percentage,
+      }))
+
+      await supabase.from('mix_session_outputs').insert(outputRows)
+
+      // Log
       await supabase.from('logs').insert({
         action: 'mix_session_created',
         entity_type: 'mix_session',
         entity_id: data.id,
-        metadata: { session_code, currency, amount },
+        metadata: { session_code, currency, amount, output_count: outputs.length },
       })
 
       return new Response(
-        JSON.stringify({ session: data }),
+        JSON.stringify({
+          session: {
+            ...data,
+            outputs: outputRows.map(o => ({ address: o.address, percentage: o.percentage })),
+          }
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201 }
       )
     }
@@ -88,7 +156,7 @@ Deno.serve(async (req) => {
 
     const { data, error } = await supabase
       .from('mix_sessions')
-      .select('session_code, currency, amount, fee_amount, net_amount, delay_hours, status, created_at')
+      .select('id, session_code, currency, amount, fee_rate, fee_amount, net_amount, delay_hours, status, created_at')
       .eq('session_code', session_code)
       .single()
 
@@ -99,8 +167,14 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Fetch outputs
+    const { data: outputs } = await supabase
+      .from('mix_session_outputs')
+      .select('address, percentage')
+      .eq('session_id', data.id)
+
     return new Response(
-      JSON.stringify({ session: data }),
+      JSON.stringify({ session: { ...data, outputs: outputs || [] } }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (err) {
