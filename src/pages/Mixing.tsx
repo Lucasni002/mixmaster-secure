@@ -13,7 +13,7 @@ import type { Currency, MixOutput, MixStatus } from "@/domain/types";
 import { CURRENCIES, CURRENCY_LABELS } from "@/domain/types";
 import { getQuote, formatCryptoAmount } from "@/domain/pricing/getQuote";
 import { validateMixRequest } from "@/domain/mixing/validateMixRequest";
-import { createSessionId } from "@/domain/mixing/createSessionId";
+import { supabase } from "@/integrations/supabase/client";
 
 const Mixing = () => {
   const { toast } = useToast();
@@ -23,6 +23,7 @@ const Mixing = () => {
   const [delay, setDelay] = useState([6]);
   const [status, setStatus] = useState<MixStatus>("idle");
   const [sessionId, setSessionId] = useState("");
+  const [sessionData, setSessionData] = useState<any>(null);
 
   const parsedAmount = parseFloat(amount) || 0;
   const quote = getQuote(currency, parsedAmount);
@@ -41,14 +42,33 @@ const Mixing = () => {
     }
 
     setStatus("submitting");
-    await new Promise((r) => setTimeout(r, 1500));
-    setStatus("processing");
-    await new Promise((r) => setTimeout(r, 2500));
 
-    const id = createSessionId();
-    setSessionId(id);
-    setStatus("complete");
-    toast({ title: "Sessão de Mix Criada", description: `Sessão ${id} em processamento.` });
+    try {
+      const { data, error } = await supabase.functions.invoke("mix-session", {
+        body: {
+          currency,
+          amount: parsedAmount,
+          outputs: outputs.map(o => ({ address: o.address.trim(), percentage: o.percentage })),
+          delay_hours: delay[0],
+        },
+      });
+
+      if (error || !data?.session) {
+        const msg = data?.error || error?.message || "Falha ao criar sessão";
+        toast({ title: "Erro", description: msg, variant: "destructive" });
+        setStatus("idle");
+        return;
+      }
+
+      const session = data.session;
+      setSessionId(session.session_code);
+      setSessionData(session);
+      setStatus("complete");
+      toast({ title: "Sessão de Mix Criada", description: `Sessão ${session.session_code} registrada.` });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message || "Erro interno", variant: "destructive" });
+      setStatus("idle");
+    }
   };
 
   const handleReset = () => {
@@ -56,18 +76,23 @@ const Mixing = () => {
     setAmount("");
     setOutputs([{ address: "", percentage: 100 }]);
     setSessionId("");
+    setSessionData(null);
   };
 
   if (status === "complete") {
+    const displayFee = sessionData ? formatCryptoAmount(sessionData.fee_amount) : formatCryptoAmount(quote.fee);
+    const displayNet = sessionData ? formatCryptoAmount(sessionData.net_amount) : formatCryptoAmount(quote.net);
+    const displayRate = sessionData ? (sessionData.fee_rate * 100).toFixed(1) : quote.ratePercent;
+
     return (
       <Layout>
         <MixingComplete
           sessionId={sessionId}
           amount={amount}
           currency={currency}
-          fee={formatCryptoAmount(quote.fee)}
-          netAmount={formatCryptoAmount(quote.net)}
-          ratePercent={quote.ratePercent}
+          fee={displayFee}
+          netAmount={displayNet}
+          ratePercent={displayRate}
           delay={delay[0]}
           outputs={outputs}
           onReset={handleReset}
@@ -164,10 +189,8 @@ const Mixing = () => {
 
             <Button variant="hero" className="w-full" onClick={handleSubmit} disabled={status !== "idle"}>
               {status === "submitting" && <Loader2 className="h-4 w-4 animate-spin" />}
-              {status === "processing" && <Loader2 className="h-4 w-4 animate-spin" />}
               {status === "idle" && "Criar Sessão de Mix"}
-              {status === "submitting" && "Validando..."}
-              {status === "processing" && "Processando..."}
+              {status === "submitting" && "Processando..."}
             </Button>
           </div>
         </div>
