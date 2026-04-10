@@ -22,10 +22,6 @@ export interface MixSessionResponse {
   outputs: { address: string; percentage: number }[];
 }
 
-export interface SessionLookupResponse {
-  session: MixSessionResponse;
-}
-
 export async function createMixSession(payload: CreateMixSessionPayload): Promise<MixSessionResponse> {
   const { data, error } = await supabase.functions.invoke("mix-session", {
     body: {
@@ -36,33 +32,17 @@ export async function createMixSession(payload: CreateMixSessionPayload): Promis
     },
   });
 
-  if (error) {
-    throw new Error(error.message || "Failed to create session");
-  }
-
-  if (data?.error) {
-    throw new Error(data.error);
-  }
-
-  if (!data?.session) {
-    throw new Error("Invalid response from server");
-  }
+  if (error) throw new Error(error.message || "Failed to create session");
+  if (data?.error) throw new Error(data.error);
+  if (!data?.session) throw new Error("Invalid response from server");
 
   return data.session as MixSessionResponse;
 }
 
 export async function lookupMixSession(sessionCode: string): Promise<MixSessionResponse> {
-  const { data, error } = await supabase.functions.invoke("mix-session", {
-    method: "GET",
-    body: undefined,
-    headers: {},
-  });
-
-  // supabase.functions.invoke doesn't support query params well for GET,
-  // so we use a direct fetch instead
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
   const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  
+
   const res = await fetch(
     `https://${projectId}.supabase.co/functions/v1/mix-session?session_code=${encodeURIComponent(sessionCode)}`,
     {
@@ -75,14 +55,8 @@ export async function lookupMixSession(sessionCode: string): Promise<MixSessionR
   );
 
   const json = await res.json();
-
-  if (!res.ok) {
-    throw new Error(json.error || `HTTP ${res.status}`);
-  }
-
-  if (!json.session) {
-    throw new Error("Session not found");
-  }
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  if (!json.session) throw new Error("Session not found");
 
   return json.session as MixSessionResponse;
 }
