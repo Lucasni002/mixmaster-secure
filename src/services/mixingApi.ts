@@ -20,6 +20,9 @@ export interface MixSessionResponse {
   status: string;
   created_at: string;
   outputs: { address: string; percentage: number }[];
+  deposit_address?: string | null;
+  coinbase_charge_id?: string | null;
+  coinbase_addresses?: Record<string, string>;
 }
 
 export async function createMixSession(payload: CreateMixSessionPayload): Promise<MixSessionResponse> {
