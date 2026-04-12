@@ -9,48 +9,18 @@ interface OutputEntry {
   percentage: number;
 }
 
-const CURRENCY_TO_COINBASE: Record<string, string> = {
-  BTC: 'bitcoin',
-  ETH: 'ethereum',
-  LTC: 'litecoin',
-  USDT: 'tether',
-  USDC: 'usdc',
-}
+function generateSimulatedAddress(currency: string): string {
+  const chars = '0123456789abcdef'
+  const randomHex = (len: number) => Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 
-async function createCoinbaseCharge(amount: number, currency: string, sessionCode: string) {
-  const apiKey = Deno.env.get('COINBASE_COMMERCE_API_KEY')
-  if (!apiKey) {
-    throw new Error('COINBASE_COMMERCE_API_KEY is not configured')
+  switch (currency) {
+    case 'BTC': return 'bc1q' + randomHex(38)
+    case 'ETH': return '0x' + randomHex(40)
+    case 'LTC': return 'ltc1q' + randomHex(38)
+    case 'USDT': return '0x' + randomHex(40)
+    case 'USDC': return '0x' + randomHex(40)
+    default: return '0x' + randomHex(40)
   }
-
-  const res = await fetch('https://api.commerce.coinbase.com/charges', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CC-Api-Key': apiKey,
-      'X-CC-Version': '2018-03-22',
-    },
-    body: JSON.stringify({
-      name: `Mix Session ${sessionCode}`,
-      description: `Crypto mixing deposit for session ${sessionCode}`,
-      pricing_type: 'fixed_price',
-      local_price: {
-        amount: amount.toString(),
-        currency: currency,
-      },
-      metadata: {
-        session_code: sessionCode,
-      },
-    }),
-  })
-
-  const json = await res.json()
-  if (!res.ok) {
-    console.error('Coinbase Commerce error:', JSON.stringify(json))
-    throw new Error(`Coinbase Commerce API error [${res.status}]: ${json?.error?.message || 'Unknown error'}`)
-  }
-
-  return json.data
 }
 
 Deno.serve(async (req) => {
