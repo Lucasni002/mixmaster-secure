@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { CheckCircle, Copy, Wallet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { QRCodeSVG } from "qrcode.react";
 import type { MixOutput, Currency } from "@/domain/types";
 
 interface MixingCompleteProps {
