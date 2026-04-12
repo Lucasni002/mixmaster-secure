@@ -85,6 +85,7 @@ const Mixing = () => {
           ratePercent={displayRate}
           delay={delay[0]}
           outputs={outputs}
+          depositAddress={sessionData?.deposit_address}
           onReset={handleReset}
         />
       </Layout>
