@@ -9,18 +9,49 @@ interface OutputEntry {
   percentage: number;
 }
 
-function generateSimulatedAddress(currency: string): string {
-  const chars = '0123456789abcdef'
-  const randomHex = (len: number) => Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+const CURRENCY_MAP: Record<string, string> = {
+  BTC: 'btc',
+  ETH: 'eth',
+  LTC: 'ltc',
+  USDT: 'usdterc20',
+  USDC: 'usdcerc20',
+}
 
-  switch (currency) {
-    case 'BTC': return 'bc1q' + randomHex(38)
-    case 'ETH': return '0x' + randomHex(40)
-    case 'LTC': return 'ltc1q' + randomHex(38)
-    case 'USDT': return '0x' + randomHex(40)
-    case 'USDC': return '0x' + randomHex(40)
-    default: return '0x' + randomHex(40)
+async function createNowPayment(currency: string, amount: number, sessionCode: string): Promise<{ pay_address: string; payment_id: number }> {
+  const apiKey = Deno.env.get('NOWPAYMENTS_API_KEY')
+  if (!apiKey) throw new Error('NOWPAYMENTS_API_KEY not configured')
+
+  const payCurrency = CURRENCY_MAP[currency]
+  if (!payCurrency) throw new Error(`Unsupported currency for NOWPayments: ${currency}`)
+
+  const res = await fetch('https://api.nowpayments.io/v1/payment', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      price_amount: amount,
+      price_currency: payCurrency,
+      pay_currency: payCurrency,
+      order_id: sessionCode,
+      order_description: `Mix session ${sessionCode}`,
+    }),
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    console.error('NOWPayments error:', res.status, text)
+    throw new Error(`NOWPayments API error: ${res.status}`)
   }
+
+  const data = await res.json()
+  if (!data.pay_address || !data.payment_id) {
+    console.error('NOWPayments unexpected response:', JSON.stringify(data))
+    throw new Error('NOWPayments did not return a deposit address')
+  }
+
+  return { pay_address: data.pay_address, payment_id: data.payment_id }
 }
 
 Deno.serve(async (req) => {
@@ -112,8 +143,20 @@ Deno.serve(async (req) => {
       const session_code = `MIX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       const primary_address = outputs[0].address
 
-      // Generate simulated deposit address
-      const deposit_address = generateSimulatedAddress(currency)
+      // Create real deposit address via NOWPayments
+      let deposit_address: string
+      let nowpayments_id: number
+      try {
+        const payment = await createNowPayment(currency, amount, session_code)
+        deposit_address = payment.pay_address
+        nowpayments_id = payment.payment_id
+      } catch (err) {
+        console.error('Failed to create NOWPayments payment:', err)
+        return new Response(
+          JSON.stringify({ error: 'Failed to generate deposit address. Please try again later.' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
+        )
+      }
 
       // Insert session
       const { data, error } = await supabase.from('mix_sessions').insert({
@@ -144,7 +187,7 @@ Deno.serve(async (req) => {
 
       await supabase.from('mix_session_outputs').insert(outputRows)
 
-      // Log
+      // Log with NOWPayments info
       await supabase.from('logs').insert({
         action: 'mix_session_created',
         entity_type: 'mix_session',
@@ -154,7 +197,8 @@ Deno.serve(async (req) => {
           currency,
           amount,
           output_count: outputs.length,
-          has_deposit_address: !!deposit_address,
+          deposit_address,
+          nowpayments_id,
         },
       })
 
@@ -164,6 +208,7 @@ Deno.serve(async (req) => {
             ...data,
             outputs: outputRows.map(o => ({ address: o.address, percentage: o.percentage })),
             deposit_address,
+            nowpayments_id,
           }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201 }
